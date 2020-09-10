@@ -52,6 +52,9 @@ private:
   QTimer * timer;
   UIState * ui_state;
   QtSound sound;
+  float brightness_b = 0;
+  float brightness_m = 0;
+  float smooth_brightness = 0;
 
 public slots:
   void timerUpdate();
