@@ -222,6 +222,7 @@ if not PC:
   persistent_processes += [
     'logcatd',
     'tombstoned',
+    'sensord',
   ]
 
 if ANDROID:
@@ -258,7 +259,6 @@ if WEBCAM:
 if not PC:
   car_started_processes += [
     'ubloxd',
-    'sensord',
     'dmonitoringd',
     'dmonitoringmodeld',
   ]
