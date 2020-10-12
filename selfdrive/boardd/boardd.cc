@@ -43,6 +43,7 @@ volatile sig_atomic_t do_exit = 0;
 bool spoofing_started = false;
 bool fake_send = false;
 bool connected_once = false;
+bool ignition = false;
 
 struct tm get_time(){
   time_t rawtime;
@@ -190,10 +191,8 @@ void can_recv(PubMaster &pm) {
   // create message
   MessageBuilder msg;
   auto event = msg.initEvent();
-  int recv = panda->can_receive(event);
-  if (recv){
-    pm.send("can", msg);
-  }
+  panda->can_receive(event);
+  pm.send("can", msg);
 }
 
 void can_send_thread() {
@@ -254,7 +253,9 @@ void can_recv_thread() {
       useconds_t sleep = remaining / 1000;
       usleep(sleep);
     } else {
-      LOGW("missed cycle");
+      if (ignition){
+        LOGW("missed cycles (%d) %lld", (int)-1*remaining/dt, remaining);
+      }
       next_frame_time = cur_time;
     }
 
@@ -295,7 +296,7 @@ void can_health_thread() {
       panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
     }
 
-    bool ignition = ((health.ignition_line != 0) || (health.ignition_can != 0));
+    ignition = ((health.ignition_line != 0) || (health.ignition_can != 0));
 
     if (ignition) {
       no_ignition_cnt = 0;
@@ -384,9 +385,6 @@ void hardware_control_thread() {
   LOGD("start hardware control thread");
   SubMaster sm({"thermal", "frontFrame"});
 
-  // Other pandas don't have hardware to control
-  if (panda->hw_type != cereal::HealthData::HwType::UNO && panda->hw_type != cereal::HealthData::HwType::DOS) return;
-
   uint64_t last_front_frame_t = 0;
   uint16_t prev_fan_speed = 999;
   uint16_t ir_pwr = 0;
@@ -400,15 +398,8 @@ void hardware_control_thread() {
     cnt++;
     sm.update(1000); // TODO: what happens if EINTR is sent while in sm.update?
 
-    if (sm.updated("thermal")){
-      // Fan speed
-      uint16_t fan_speed = sm["thermal"].getThermal().getFanSpeed();
-      if (fan_speed != prev_fan_speed || cnt % 100 == 0){
-        panda->set_fan_speed(fan_speed);
-        prev_fan_speed = fan_speed;
-      }
-
 #ifdef QCOM
+    if (sm.updated("thermal")){
       // Charging mode
       bool charging_disabled = sm["thermal"].getThermal().getChargingDisabled();
       if (charging_disabled != prev_charging_disabled){
@@ -421,7 +412,18 @@ void hardware_control_thread() {
         }
         prev_charging_disabled = charging_disabled;
       }
+    }
 #endif
+
+    // Other pandas don't have fan/IR to control
+    if (panda->hw_type != cereal::HealthData::HwType::UNO && panda->hw_type != cereal::HealthData::HwType::DOS) continue;
+    if (sm.updated("thermal")){
+      // Fan speed
+      uint16_t fan_speed = sm["thermal"].getThermal().getFanSpeed();
+      if (fan_speed != prev_fan_speed || cnt % 100 == 0){
+        panda->set_fan_speed(fan_speed);
+        prev_fan_speed = fan_speed;
+      }
     }
     if (sm.updated("frontFrame")){
       auto event = sm["frontFrame"];
